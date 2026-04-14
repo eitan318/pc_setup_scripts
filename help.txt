@@ -1,0 +1,28 @@
+Windows script
+--------------
+1. Open PowerShell as Administrator (Right-click Start > Terminal Admin).
+2. Run this command: Set-ExecutionPolicy RemoteSigned -Scope Process
+2.1 Type A and press Enter.
+3. Run the script by typing its file path: C:\path\to\your_script.ps1
+3.1 Wait 2-5 minutes for the core system components to install.
+4. When the script stops, manually restart your PC to activate WSL drivers.
+5. After logging back in, open PowerShell as Administrator and run the script again.
+5.1 Sign in to GitHub via your browser if prompted.
+5.2 Wait 1-2 minutes for your configurations and apps to download.
+6. Once you see "SETUP COMPLETE", restart one last time to sync all settings.
+
+Ubuntu script
+--------------
+1. Enter ubuntu in wsl
+2. cd to windows folder:
+cd /mnt/c/Users/YOUR_USERNAME/temp_dots
+3. clean windows line-ending in script:
+sed -i 's/\r$//' setup_ubuntu.sh
+chmod +x setup_ubuntu.sh
+4. Run the script directly from there:
+./setup_ubuntu.sh
+
+
+Additional steps missing
+------------------------
+1. install ollama
