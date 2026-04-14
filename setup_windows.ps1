@@ -1,20 +1,39 @@
 # --- CONFIGURATION ---
 $DOTFILES_URL = "https://github.com/eitan318/dotfiles.git"
-$TEMP_DOTS = "$HOME\temp_dots"
-$REBOOT_FLAG = "$HOME\.setup_reboot_done"
+$DOTFILES_DIR = "$HOME\dotfiles"
+$CONFIG_DIR   = "$HOME\.config"
+$REBOOT_FLAG  = "$HOME\.setup_reboot_done"
+$STARTUP_FOLDER = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup"
 
-Write-Host "`n=== WINDOWS UNIFIED SETUP (Performance & WPF) ===" -ForegroundColor Cyan
+Write-Host "`n=== WINDOWS UNIFIED SETUP (i3-Style & Performance) ===" -ForegroundColor Cyan
 
 function Install-App {
     param([string]$id, [string]$executableName)
-    $inPath = Get-Command $executableName -ErrorAction SilentlyContinue
-    if (!$inPath) {
+    # Check winget list first
+    $installed = winget list --id $id -e --accept-source-agreements 2>$null
+    
+    if (!$installed) {
         Write-Host "[INSTALLING] $id..." -ForegroundColor Green
         winget install --id $id --silent --force --accept-package-agreements --accept-source-agreements | Out-Null
+        
+        # Force refresh PATH in current session after install
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
         return $true
     }
+    
     Write-Host "[EXISTS] $id skipping." -ForegroundColor Gray
     return $false
+}
+
+function Create-Link {
+    param([string]$source, [string]$target)
+    if (Test-Path $source) {
+        if (Test-Path $target) {
+            Remove-Item -Recurse -Force $target
+        }
+        New-Item -ItemType SymbolicLink -Path $target -Value $source | Out-Null
+        Write-Host "[LINKED] $target -> $source" -ForegroundColor Green
+    }
 }
 
 # --- PHASE 1: SYSTEM CORE ---
@@ -22,87 +41,106 @@ if (!(Test-Path $REBOOT_FLAG)) {
     Write-Host "`n[STEP 1/2] Installing System Components" -ForegroundColor Yellow
     
     Install-App "Git.Git" "git"
+    Install-App "vim.vim" "vim"  # Installs Vim 9.x
     Install-App "Microsoft.WSL" "wsl"
     Install-App "OpenJS.NodeJS" "node"
     Install-App "Microsoft.DotNet.SDK.9" "dotnet"
+    Install-App "AutoHotkey.AutoHotkey" "AutoHotkeyUX.exe"
 
     New-Item -Path $REBOOT_FLAG -ItemType File -Force | Out-Null
 
     Write-Host "`nCORE COMPONENTS INSTALLED." -ForegroundColor Cyan
     Write-Host "------------------------------------------------------------"
     Write-Host "ACTION REQUIRED: Please restart your computer now." -ForegroundColor Red
-    Write-Host "Run this script again immediately after logging back in."
     Write-Host "------------------------------------------------------------"
     exit
 }
 
-# --- PHASE 2: APPS & CONFIGS ---
+# --- PHASE 2: APPS & SYMLINKS ---
 Write-Host "`n[STEP 2/2] Configuring Environment" -ForegroundColor Yellow
 
-# Refresh Path
+# Final PATH refresh
 $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
 
 Install-App "Mozilla.Firefox" "firefox"
 Install-App "Microsoft.VisualStudioCode" "code"
+Install-App "LGUG2Z.Komorebi" "komorebi"
 
-# Ensure 'code' is available for extension install
-if (!(Get-Command "code" -ErrorAction SilentlyContinue)) {
-    $vscodePath = "$env:LocalAppData\Programs\Microsoft VS Code\bin"
-    if (Test-Path $vscodePath) { $env:Path += ";$vscodePath" }
+if (!(Test-Path $CONFIG_DIR)) { New-Item -ItemType Directory -Path $CONFIG_DIR }
+
+# --- DOTFILES SYNC ---
+Write-Host "[DOTFILES] Syncing configurations..." -ForegroundColor Cyan
+if (!(Test-Path $DOTFILES_DIR)) {
+    git clone $DOTFILES_URL $DOTFILES_DIR --quiet
+} else {
+    Set-Location $DOTFILES_DIR
+    git pull --quiet
+    Set-Location $HOME
 }
 
-# --- INSTALL VS CODE EXTENSIONS ---
+# --- SYMLINK DEPLOYMENT ---
+
+# 1. Common Configs (Neovim, Alacritty, etc.)
+$commonPath = "$DOTFILES_DIR\common\.config"
+if (Test-Path $commonPath) {
+    Get-ChildItem -Path $commonPath | ForEach-Object {
+        Create-Link -source $_.FullName -target "$CONFIG_DIR\$($_.Name)"
+    }
+}
+
+# 2. Vim Configuration
+$repoVimrc = "$DOTFILES_DIR\common\.vimrc"
+if (Test-Path $repoVimrc) {
+    Create-Link -source $repoVimrc -target "$HOME\.vimrc"
+}
+
+# 3. Komorebi
+Create-Link -source "$DOTFILES_DIR\win\komorebi\komorebi.json" -target "$CONFIG_DIR\komorebi.json"
+
+# 4. Kanata Windows
+$kanataWinDir = "$HOME\kanata"
+if (!(Test-Path $kanataWinDir)) { New-Item -ItemType Directory -Path $kanataWinDir }
+if (Test-Path "$DOTFILES_DIR\win\kanata") {
+    Get-ChildItem -Path "$DOTFILES_DIR\win\kanata" | ForEach-Object {
+        Create-Link -source $_.FullName -target "$kanataWinDir\$($_.Name)"
+    }
+}
+
+# 5. WSL Config
+Create-Link -source "$DOTFILES_DIR\nix\wsl\.wslconfig" -target "$HOME\.wslconfig"
+
+# --- STARTUP AUTOMATION ---
+Write-Host "[STARTUP] Registering Komorebi & i3.ahk..." -ForegroundColor Cyan
+
+if (Get-Command "komorebic" -ErrorAction SilentlyContinue) {
+    komorebic enable-autostart --config "$CONFIG_DIR\komorebi.json"
+}
+
+$ahkSource = "$DOTFILES_DIR\win\komorebi\i3.ahk"
+if (Test-Path $ahkSource) {
+    Create-Link -source $ahkSource -target "$STARTUP_FOLDER\i3.ahk"
+}
+
+# --- POST-LINK ACTIONS ---
+
+# VS Code Extensions
 if (Get-Command "code" -ErrorAction SilentlyContinue) {
-    Write-Host "[CONFIG] Installing VS Code Extensions..." -ForegroundColor Cyan
-    $extensions = @(
-        "ms-dotnettools.csdevkit",
-        "groosoft.visualstudiocodexamlstyler",
-        "shevchenko-nikita.xaml-previewer",
-        "ms-vscode-remote.remote-wsl",  
-        "vscodevim.vim",
-        "anthropic.claude-dev"
-    )
+    $extensions = @("ms-dotnettools.csdevkit", "vscodevim.vim", "anthropic.claude-dev", "ms-vscode-remote.remote-wsl")
     foreach ($ext in $extensions) {
-        Write-Host "  -> $ext" -ForegroundColor Gray
         Start-Process "code" -ArgumentList "--install-extension $ext --force" -Wait -NoNewWindow
     }
 }
 
-# --- INSTALL CLAUDE CODE CLI (NPM) ---
+# Claude Code
 if (Get-Command "npm" -ErrorAction SilentlyContinue) {
-    Write-Host "[INSTALLING] Claude Code CLI..." -ForegroundColor Green
     npm install -g @anthropic-ai/claude-code
 }
 
-# --- WSL SETUP ---
+# Finalize WSL
 if (!(wsl --list --quiet | Select-String "Ubuntu")) {
-    Write-Host "[WSL] Installing Ubuntu..." -ForegroundColor Green
     wsl --install -d Ubuntu --no-launch
 }
-
-# --- DOTFILES SYNC ---
-Write-Host "[DOTFILES] Syncing configurations..." -ForegroundColor Cyan
-if (Test-Path $TEMP_DOTS) { Remove-Item -Recurse -Force $TEMP_DOTS }
-git clone $DOTFILES_URL $TEMP_DOTS --quiet
-
-# --- CONFIG DEPLOYMENT (Based on your Tree structure) ---
-
-
-# Kanata Windows
-if (Test-Path "$TEMP_DOTS\win\kanata") {
-    $kanataDir = "$HOME\kanata"
-    if (!(Test-Path $kanataDir)) { New-Item -ItemType Directory -Path $kanataDir }
-    Copy-Item -Path "$TEMP_DOTS\win\kanata\*" -Destination $kanataDir -Force
-    Write-Host "[OK] Kanata Windows configs deployed." -ForegroundColor Green
-}
-
-# WSL Performance (.wslconfig)
-$repoWslConfig = "$TEMP_DOTS\nix\wsl\.wslconfig"
-if (Test-Path $repoWslConfig) {
-    Copy-Item -Path $repoWslConfig -Destination "$HOME\.wslconfig" -Force
-    Write-Host "[OK] WSL performance config deployed." -ForegroundColor Green
-    wsl --shutdown
-}
+wsl --shutdown
 
 Remove-Item $REBOOT_FLAG -Force
 Write-Host "`n=== SETUP COMPLETE ===" -ForegroundColor Cyan
