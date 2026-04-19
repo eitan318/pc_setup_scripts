@@ -9,7 +9,7 @@ echo "--- Ubuntu Setup: Performance Dev Env ---"
 
 # 1. Update and install Core Tools + GitHub CLI
 sudo apt update
-sudo apt install -y git neovim tmux curl build-essential gh
+sudo apt install -y git neovim tmux curl unzip wget build-essential gh
 
 # 2. GitHub Authentication
 if ! gh auth status &>/dev/null; then
